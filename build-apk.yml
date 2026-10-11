@@ -1,0 +1,79 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodni yuklab olish
+        uses: actions/checkout@v4
+
+      - name: Imzo kaliti (secrets) borligini tekshirish
+        env:
+          KB: ${{ secrets.KEYSTORE_BASE64 }}
+          KP: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KB" ] || [ -z "$KP" ]; then
+            echo "::error::KEYSTORE_BASE64 yoki KEYSTORE_PASSWORD topilmadi. QOLLANMA.md dagi 3-qismni bajaring."
+            exit 1
+          fi
+
+      - name: Java o'rnatish
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Flutter o'rnatish
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Android loyiha skeletini yaratish
+        run: flutter create --platforms=android --org com.example --project-name qarz_daftar build_app
+
+      - name: Bizning kodni joylash
+        run: |
+          rm -rf build_app/lib build_app/test
+          cp -r lib build_app/lib
+
+      - name: Paketlarni qo'shish
+        working-directory: build_app
+        run: flutter pub add firebase_core cloud_firestore firebase_auth intl
+
+      - name: Android sozlamalari (minSdk, INTERNET, ilova nomi)
+        working-directory: build_app
+        run: |
+          if [ -f android/app/build.gradle.kts ]; then sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' android/app/build.gradle.kts; fi
+          if [ -f android/app/build.gradle ]; then sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle; fi
+          sed -i '0,/<application/s//<uses-permission android:name="android.permission.INTERNET"\/>\n    <application/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="qarz_daftar"/android:label="Qarz Daftar"/' android/app/src/main/AndroidManifest.xml
+          grep -rn "minSdk" android/app/build.gradle* || true
+          grep -n "INTERNET\|android:label" android/app/src/main/AndroidManifest.xml
+
+      - name: APK yig'ish
+        working-directory: build_app
+        run: flutter build apk --release --build-number=${{ github.run_number }}
+
+      - name: APK ni o'z kalitingiz bilan imzolash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > upload.jks
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          $BT/apksigner sign --ks upload.jks --ks-key-alias upload \
+            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD \
+            --out qarz-daftar.apk build_app/build/app/outputs/flutter-apk/app-release.apk
+          $BT/apksigner verify --print-certs qarz-daftar.apk
+          rm -f upload.jks
+
+      - name: Tayyor APK ni saqlash
+        uses: actions/upload-artifact@v4
+        with:
+          name: qarz-daftar-apk
+          path: qarz-daftar.apk
