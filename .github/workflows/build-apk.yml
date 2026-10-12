@@ -70,7 +70,15 @@ jobs:
         working-directory: build_app
         run: flutter build apk --release --build-number=${{ github.run_number }}
 
+      - name: Vaqtinchalik APK ni saqlash (kalitsiz variant)
+        uses: actions/upload-artifact@v4
+        with:
+          name: qarz-daftar-apk-vaqtincha
+          path: build_app/build/app/outputs/flutter-apk/app-release.apk
+
       - name: APK ni o'z kalitingiz bilan imzolash
+        id: sign
+        continue-on-error: true
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -83,7 +91,8 @@ jobs:
           $BT/apksigner verify --print-certs qarz-daftar.apk
           rm -f upload.jks
 
-      - name: Tayyor APK ni saqlash
+      - name: Imzolangan APK ni saqlash
+        if: steps.sign.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: qarz-daftar-apk
